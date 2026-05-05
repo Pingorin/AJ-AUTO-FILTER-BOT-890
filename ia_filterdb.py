@@ -370,7 +370,6 @@ class MediaDB:
             for roman, digit in roman_map.items():
                 clean_hidden_data = re.sub(rf"(?i)(?<=\s)\b{roman}\b", digit, clean_hidden_data)
             
-            # ✅ Meta injection se source hata diya (clean code)
             meta_injection = " ".join(parsed_meta['quality'] + parsed_meta['year'] + parsed_meta['languages'])
             raw_master_text = f"{clean_hidden_data} {spaceless_name} {variation_text} {meta_injection}".lower()
             
@@ -617,16 +616,18 @@ class MediaDB:
             
             if not files: raise Exception("Fallback Search Triggered")
 
+            # 🔥 3-DB Merge Sort: Rank cross-database results by exact Atlas Score
+            files.sort(key=lambda x: x.get('score', 0), reverse=True)
+
             return files[:100]
 
         except Exception as e:
-            # 7. SAFE FALLBACK (Bina Wildcard Regex ke, simple and fast)
+            # 7. SAFE FALLBACK (Broad 'OR' Logic with Button Filters)
             try:
                 fallback_match = {}
                 words = clean_query.split()
                 fallback_or_clauses = []
                 
-                # Faltu wildcard aur alias_map hata diya, seedha fast search chalega
                 for tw in words:
                     safe_tw = rf"\b{re.escape(tw)}\b"
                     fallback_or_clauses.append({"search_text": {"$regex": safe_tw, "$options": "i"}})
@@ -636,6 +637,18 @@ class MediaDB:
                     fallback_match["$or"] = fallback_or_clauses
                 
                 if file_type and file_type != "none": fallback_match["file_type"] = "video" if file_type.lower() == "video" else "document"
+                if lang and lang != "none":
+                    pattern = LANG_MAP.get(lang, lang)
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"languages": lang}, {"file_name": {"$regex": pattern, "$options": "i"}}]}]
+                if quality and quality != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"quality": quality}, {"file_name": {"$regex": quality, "$options": "i"}}]}]
+                if year and year != "none":
+                    fallback_match["$and"] = fallback_match.get("$and", []) + [{"$or": [{"year": str(year)}, {"file_name": {"$regex": str(year)}}]}]
+                if size_range and size_range != "none":
+                    if size_range == "min500": fallback_match["file_size"] = {"$lt": MB_500}
+                    elif size_range == "500-1gb": fallback_match["file_size"] = {"$gte": MB_500, "$lt": GB_1}
+                    elif size_range == "1gb-2gb": fallback_match["file_size"] = {"$gte": GB_1, "$lt": GB_2}
+                    elif size_range == "max2gb": fallback_match["file_size"] = {"$gte": GB_2}
 
                 fallback_pipeline = [
                     {"$match": fallback_match},
@@ -669,6 +682,9 @@ class MediaDB:
                 files = []
                 for res in fb_results:
                     files.extend(res)
+                
+                # 🔥 Fallback 3-DB Merge Sort: Sort results combined from all databases
+                files.sort(key=lambda x: x.get('name_length', 999))
                 
                 return files[:30]
                     
